@@ -71,7 +71,19 @@ def format_vn(number) -> str:
 
 # --- Update CSV ---
 def update_funds_csv(file_path=CSV_FILE):
-    df = pd.read_csv(file_path, sep=";")
+    try:
+        df = pd.read_csv(file_path, sep=";")
+    except Exception as e:
+        print(f"⚠️ Could not read {file_path}: {e}")
+        return pd.DataFrame([{
+            "items": "TOTAL",
+            "type": "",
+            "quantity": "",
+            "buy_price": "",
+            "current_price": "",
+            "profit_loss": "0,00"
+        }])
+
     df = df[df["items"] != "TOTAL"]
     total_profit_loss = 0.0
 
@@ -79,18 +91,24 @@ def update_funds_csv(file_path=CSV_FILE):
         code = str(row["items"]).strip().upper()
         asset_type = str(row.get("type", "")).strip().lower()
         price = None
-        if asset_type == "fund":
-            price = fetch_fund_price(code)
-        elif asset_type == "stock":
-            price = fetch_stock_price(code)
-        if price:
-            profit_loss_value = (price - row["buy_price"]) * row["quantity"]
+
+        try:
+            if asset_type == "fund":
+                price = fetch_fund_price(code)
+            elif asset_type == "stock":
+                price = fetch_stock_price(code)
+        except Exception as e:
+            print(f"⚠️ Fetch error for {code}: {e}")
+
+        if price is not None:
+            profit_loss_value = (price - float(row["buy_price"])) * float(row["quantity"])
             total_profit_loss += profit_loss_value
             df.at[i, "current_price"] = format_vn(price)
             df.at[i, "profit_loss"] = format_vn(profit_loss_value)
         else:
-            df.at[i, "current_price"] = "N/A"
-            df.at[i, "profit_loss"] = "N/A"
+            # fallback fast (no blocking)
+            df.at[i, "current_price"] = "0,00"
+            df.at[i, "profit_loss"] = "0,00"
 
     sum_row = {
         "items": "TOTAL",
@@ -101,8 +119,43 @@ def update_funds_csv(file_path=CSV_FILE):
         "profit_loss": format_vn(total_profit_loss)
     }
     df = pd.concat([df, pd.DataFrame([sum_row])], ignore_index=True)
+
+    # overwrite CSV so app can reload without scraping
     df.to_csv(file_path, sep=";", index=False)
     return df
+
+
+# --- Flask route ---
+@app.route("/")
+def home():
+    try:
+        df = update_funds_csv()
+        table_html = style_table(df)
+        chart_html = create_profit_loss_chart(df)
+    except Exception as e:
+        print(f"⚠️ Page render failed: {e}")
+        return "⚠️ Error building page. Please check logs."
+
+    html_template = """
+    <html>
+        <head>
+            <title>Profit/Loss Chart & Table</title>
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+            <style> table {width: 100%;} </style>
+        </head>
+        <body class="container">
+            <h1 class="mt-3 mb-3">Profit/Loss by Item</h1>
+            {{ chart_div|safe }}
+            <h2 class="mt-5">Data Table</h2>
+            {{ table_div|safe }}
+        </body>
+    </html>
+    """
+    return render_template_string(
+        html_template,
+        table_div=Markup(table_html),
+        chart_div=Markup(chart_html)
+    )
 
 # --- Plotly chart ---
 def create_profit_loss_chart(df):
