@@ -1,6 +1,10 @@
-Flask==3.0.3
-gunicorn==21.2.0
-pandas==2.2.2
-matplotlib==3.9.2
-requests==2.32.3
-beautifulsoup4==4.12.3
+Flask
+gunicorn
+pandas
+matplotlib
+requests
+beautifulsoup4
+setuptools
+wheel
+plotly
+markupsafe
